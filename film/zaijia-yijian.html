@@ -1,0 +1,391 @@
+<meta charset="utf-8">
+<title>再加一键</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Noto+Sans+SC:wght@500;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* 布局：一块 16:9 的剪纸舞台，下方一条放映控制条，像小型放映机 */
+:root {
+  --night: #1b1836; --plum: #38214f; --raspberry: #c51a4a; --leaf: #5fb548;
+  --paper: #f4ecd8; --coral: #f08a5d; --ink: #1b1320; --muted: #b9afcf;
+  --display: "ZCOOL KuaiLe", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--night); color: var(--paper); font-family: var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+}
+#stage {
+  display: block; width: min(100%, calc((100vh - 84px) * 16 / 9)); max-width: 100%;
+  aspect-ratio: 16 / 9; background: var(--night); cursor: pointer; border-radius: 3px;
+}
+#bar {
+  width: min(100%, calc((100vh - 84px) * 16 / 9)); display: flex; align-items: center; gap: 10px; min-width: 0;
+}
+button {
+  font: 700 14px var(--body); color: var(--ink); background: var(--paper); border: 0;
+  padding: 8px 12px; border-radius: 2px; cursor: pointer; white-space: nowrap; box-shadow: 2px 3px 0 #0006;
+}
+button[aria-pressed="true"] { background: var(--leaf); }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--coral); outline-offset: 2px; }
+#seek { flex: 1; min-width: 0; accent-color: var(--raspberry); }
+#clock { font: 500 13px "JetBrains Mono", Consolas, monospace; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 480px) { #clock { display: none; } button { padding: 8px 9px; } }
+</style>
+
+<canvas id="stage" width="1280" height="720" role="img" aria-label="剪纸动画短片《再加一键》：一个叫小克的纸片角色，帮用户写树莓派安装脚本的经过"></canvas>
+<div id="bar">
+  <button id="play" type="button">暂停</button>
+  <input id="seek" type="range" min="0" max="72" step="0.05" value="0" aria-label="播放进度">
+  <span id="clock">00:00 / 01:12</span>
+  <button id="sound" type="button" aria-pressed="false">开声音</button>
+  <button id="full" type="button">全屏</button>
+</div>
+
+<script>
+const cv = document.getElementById("stage"), c = cv.getContext("2d");
+const W = 1280, H = 720, END = 72;
+const C = { night: "#1b1836", dusk: "#2a2150", plum: "#38214f", wine: "#7c1538", rasp: "#c51a4a", leaf: "#5fb548", deep: "#2f7d3a",
+  paper: "#f4ecd8", coral: "#f08a5d", ink: "#1b1320", gold: "#e8b93f", sky: "#7fb7c9", steel: "#c4c9d4", muted: "#8d81a8" };
+const DISPLAY = '"ZCOOL KuaiLe","PingFang SC","Microsoft YaHei",sans-serif';
+const BODY = '"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif';
+const MONO = '"JetBrains Mono",Consolas,monospace';
+
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const outBack = x => { const k = 1.70158; return 1 + (k + 1) * Math.pow(x - 1, 3) + k * Math.pow(x - 1, 2); };
+const outCubic = x => 1 - Math.pow(1 - x, 3);
+const inCubic = x => x * x * x;
+const bounce = x => { const n = 7.5625, d = 2.75;
+  if (x < 1 / d) return n * x * x;
+  if (x < 2 / d) return n * (x -= 1.5 / d) * x + .75;
+  if (x < 2.5 / d) return n * (x -= 2.25 / d) * x + .9375;
+  return n * (x -= 2.625 / d) * x + .984375; };
+function rnd(seed) { let s = (seed * 2654435761) >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let z = s; z = Math.imul(z ^ (z >>> 15), z | 1); z ^= z + Math.imul(z ^ (z >>> 7), z | 61); return ((z ^ (z >>> 14)) >>> 0) / 4294967296; }; }
+
+/* 剪纸：手剪的毛边 + 投影 */
+function paperRect(x, y, w, h, color, seed = 1, shadow = 1) {
+  const r = rnd(seed), j = () => (r() - .5) * 3.2, step = 46;
+  c.beginPath(); c.moveTo(x + j(), y + j());
+  for (let i = step; i < w; i += step) c.lineTo(x + i, y + j());
+  c.lineTo(x + w + j(), y + j());
+  for (let i = step; i < h; i += step) c.lineTo(x + w + j(), y + i);
+  c.lineTo(x + w + j(), y + h + j());
+  for (let i = w - step; i > 0; i -= step) c.lineTo(x + i, y + h + j());
+  c.lineTo(x + j(), y + h + j());
+  for (let i = h - step; i > 0; i -= step) c.lineTo(x + j(), y + i);
+  c.closePath(); fillPaper(color, shadow);
+}
+function paperCircle(x, y, rad, color, seed = 1, shadow = 1) {
+  const r = rnd(seed), n = Math.max(12, Math.round(rad / 2.6));
+  c.beginPath();
+  for (let i = 0; i < n; i++) { const a = i / n * 6.2832, q = rad + (r() - .5) * 2.6; c[i ? "lineTo" : "moveTo"](x + Math.cos(a) * q, y + Math.sin(a) * q); }
+  c.closePath(); fillPaper(color, shadow);
+}
+function fillPaper(color, shadow) {
+  c.save(); if (shadow) { c.shadowColor = "rgba(8,2,20,.5)"; c.shadowBlur = 9 * shadow; c.shadowOffsetX = 3 * shadow; c.shadowOffsetY = 6 * shadow; }
+  c.fillStyle = color; c.fill(); c.restore();
+}
+function text(s, x, y, size, color = C.ink, font = BODY, align = "center", weight = "") {
+  c.font = `${weight} ${size}px ${font}`; c.fillStyle = color; c.textAlign = align; c.textBaseline = "middle"; c.fillText(s, x, y);
+}
+function wrapped(s, x, y, maxW, size, lh, color, font) {
+  c.font = `${size}px ${font}`; const lines = []; let l = "";
+  for (const ch of s) { if (c.measureText(l + ch).width > maxW) { lines.push(l); l = ch; } else l += ch; }
+  lines.push(l); lines.forEach((ln, i) => text(ln, x, y - (lines.length - 1) * lh / 2 + i * lh, size, color, font));
+}
+function card(x, y, w, h, s, o = {}) {
+  c.save(); c.translate(x, y); c.rotate(o.rot || 0); c.scale(o.sx ?? 1, o.sy ?? 1);
+  paperRect(-w / 2, -h / 2, w, h, o.color || C.paper, o.seed || 3);
+  if (s) text(s, 0, 2, o.size || 26, o.ink || C.ink, o.font || DISPLAY);
+  c.restore();
+}
+function stamp(x, y, s, p, rot = -.12, size = 54, color = C.rasp) {
+  if (p <= 0) return;
+  const k = 1 + (1 - outCubic(p)) * 1.6;
+  c.save(); c.translate(x, y); c.rotate(rot); c.scale(k, k); c.globalAlpha = clamp(p * 2);
+  c.font = `${size}px ${DISPLAY}`; const w = c.measureText(s).width + 44, h = size + 28;
+  c.strokeStyle = color; c.lineWidth = 7; c.strokeRect(-w / 2, -h / 2, w, h);
+  text(s, 0, 3, size, color, DISPLAY); c.restore();
+}
+function bubble(x, y, w, h, s, p, size = 30, tailX) {
+  if (p <= 0) return;
+  c.save(); c.translate(x, y); const k = outBack(clamp(p)); c.scale(k, k);
+  c.beginPath(); const tx = tailX ?? w * .3; c.moveTo(tx - 16, h / 2 - 2); c.lineTo(tx + 8, h / 2 + 30); c.lineTo(tx + 24, h / 2 - 2); c.closePath(); fillPaper(C.paper, .6);
+  paperRect(-w / 2, -h / 2, w, h, C.paper, 11);
+  wrapped(s, 0, 2, w - 44, size, size * 1.32, C.ink, BODY); c.restore();
+}
+
+/* 主角：小克，一张珊瑚色的纸片 */
+function kid(x, y, s, o = {}, t = 0) {
+  const boil = Math.floor(t * 6) % 3, sq = o.sq ?? 1, walk = o.walk ? Math.sin(o.walk) : 0;
+  c.save(); c.translate(x, y); c.scale(s * (o.flip ? -1 : 1) * (2 - sq > 1.6 ? 1.6 : 2 - sq), s * sq); c.rotate(o.tilt || 0);
+  paperRect(-22, -26 + Math.max(0, walk) * -6, 11, 28, C.ink, 21 + boil, .5);
+  paperRect(11, -26 + Math.max(0, -walk) * -6, 11, 28, C.ink, 23 + boil, .5);
+  c.save(); c.translate(-38, -66); c.rotate(o.armL ?? .5); paperRect(-6, 0, 12, 36, C.wine, 25 + boil, .4); c.restore();
+  c.save(); c.translate(38, -66); c.rotate(o.armR ?? -.5); paperRect(-6, 0, 12, 36, C.wine, 27 + boil, .4); c.restore();
+  paperRect(-3, -146, 6, 26, C.ink, 29, .3); paperCircle(0, -150, 8, o.bulb || C.gold, 30, .4);
+  paperRect(-42, -124, 84, 104, C.coral, 31 + boil);
+  const e = o.eyes || "open", ey = -90;
+  c.fillStyle = C.ink; c.strokeStyle = C.ink; c.lineWidth = 5; c.lineCap = "round";
+  for (const ex of [-16, 16]) {
+    c.beginPath();
+    if (e === "wide") { c.fillStyle = C.paper; c.arc(ex, ey, 11, 0, 7); c.fill(); c.fillStyle = C.ink; c.beginPath(); c.arc(ex, ey, 4, 0, 7); c.fill(); }
+    else if (e === "flat") { c.moveTo(ex - 9, ey); c.lineTo(ex + 9, ey); c.stroke(); }
+    else if (e === "happy") { c.arc(ex, ey + 4, 8, Math.PI * 1.15, Math.PI * 1.85); c.stroke(); }
+    else { c.arc(ex, ey, 5.5, 0, 7); c.fill(); }
+  }
+  c.beginPath();
+  const m = o.mouth || "smile";
+  if (m === "smile") { c.arc(0, -70, 10, .25, Math.PI - .25); c.stroke(); }
+  else if (m === "o") { c.arc(0, -64, 7, 0, 7); c.fill(); }
+  else { c.moveTo(-9, -66); c.lineTo(9, -66); c.stroke(); }
+  if (o.sweat) { c.fillStyle = C.sky; c.beginPath(); c.arc(50, -104 + (t * 40 % 26), 7, 0, 7); c.fill(); }
+  c.restore();
+}
+
+/* 树莓派：一块绿色电路板 */
+function pi(x, y, s, o = {}, t = 0) {
+  c.save(); c.translate(x, y); c.scale(s, s); c.rotate(o.tilt || 0);
+  paperRect(-120, -78, 240, 156, C.deep, 41);
+  for (let i = 0; i < 13; i++) paperRect(-98 + i * 15, -72, 9, 12, C.gold, 42 + i, 0);
+  paperRect(66, -44, 62, 36, C.steel, 60, .5); paperRect(66, 4, 62, 36, C.steel, 61, .5);
+  paperRect(-66, -44, 92, 84, C.ink, 62, .4);
+  const led = o.awake ? (Math.floor(t * 3) % 2 ? C.leaf : "#b8ef9f") : "#40303f";
+  paperCircle(-98, 48, 7, led, 63, 0);
+  if (o.awake) {
+    c.strokeStyle = C.paper; c.fillStyle = C.paper; c.lineWidth = 5; c.lineCap = "round";
+    c.beginPath(); c.arc(-40, -14, 7, 0, 7); c.arc(-40, -14, 0, 0, 0); c.fill();
+    c.beginPath(); c.arc(0, -14, 7, 0, 7); c.fill();
+    c.beginPath(); c.arc(-20, 8, 13, .2, Math.PI - .2); c.stroke();
+  } else {
+    c.strokeStyle = C.muted; c.lineWidth = 5; c.lineCap = "round";
+    c.beginPath(); c.moveTo(-48, -12); c.lineTo(-32, -12); c.moveTo(-8, -12); c.lineTo(8, -12); c.stroke();
+  }
+  c.restore();
+}
+
+/* 背景：窗外的夜，几层纸山和一张桌子 */
+function room(t, o = {}) {
+  c.fillStyle = o.sky || C.night; c.fillRect(0, 0, W, H);
+  paperCircle(1080, 130, 62, o.moon || C.paper, 71, .6);
+  for (let i = 0; i < 18; i++) { const r = rnd(80 + i), x = r() * W, y = r() * 300; c.fillStyle = Math.floor(t * 2 + i) % 5 ? "#6f68a0" : C.paper; c.fillRect(x, y, 4, 4); }
+  c.beginPath(); c.moveTo(0, 470);
+  for (let x = 0; x <= W + 40; x += 40) c.lineTo(x, 450 + Math.sin(x * .011) * 42 + Math.sin(x * .03) * 12);
+  c.lineTo(W, H); c.lineTo(0, H); c.closePath(); fillPaper(o.hill || C.dusk, .8);
+  paperRect(-20, 548, W + 40, 200, o.desk || C.plum, 77, 1.2);
+}
+function subtitle(s) {
+  c.font = `32px ${BODY}`; const w = Math.min(W - 80, c.measureText(s).width + 56);
+  paperRect(W / 2 - w / 2, 642, w, 58, C.paper, 91);
+  text(s, W / 2, 672, 32, C.ink, BODY);
+}
+
+const SUBS = [
+  [5.2, 9, "用户：帮我做一个树莓派脚本，顺便把这些都装上。"],
+  [9.3, 13.8, "小克：好的。一个脚本，全部装完。"],
+  [14.6, 17.6, "写完了。开始检查。"],
+  [17.8, 20.8, "小克：换行符全错了！270 行！"],
+  [21, 25.5, "按字节一数：0 个。是 grep 看错了。"],
+  [26.3, 29.2, "小克：修好了！"],
+  [29.4, 33, "……那条命令被安全检查拦下了，根本没跑。"],
+  [33.8, 37.5, "用户：再加上一件。"],
+  [37.8, 42.8, "小克造了一台很复杂的机器。最后一步：请你手动导入订阅。"],
+  [43.4, 46.2, "用户："],
+  [47.6, 50, "小克：……对哦。"],
+  [50.6, 57.4, "现在只要填一次订阅，其余的交给一条命令。"],
+  [58.4, 61.2, "“所以，它真的跑过吗？”"],
+  [61.4, 65.2, "小克：……还没有在真实的树莓派上跑过。"],
+];
+
+const SCENES = [
+  { a: 0, b: 4.8, f(t) { // 片名
+    room(t, { sky: C.wine, hill: C.rasp, desk: C.plum, moon: C.gold });
+    const chars = ["再", "加", "一", "键"];
+    chars.forEach((ch, i) => { const p = bounce(prog(t, .2 + i * .28, .95 + i * .28)), x = 325 + i * 210, y = -130 + p * 400;
+      card(x, y, 176, 176, ch, { rot: (i % 2 ? .05 : -.05), color: i === 3 ? C.leaf : C.paper, size: 118, seed: 100 + i }); });
+    if (t > 2) text("根据一次真实的会话改编", W / 2, 462, 34, C.paper, DISPLAY);
+    kid(1090, 650, 1, { eyes: "happy", armR: -2.3 }, t);
+  } },
+  { a: 4.8, b: 14.2, f(t, u) { // 需求如雨
+    room(t);
+    const items = [["美国时区", C.sky], ["Claude Code", C.coral], ["Clash Verge", C.gold], ["Git", C.paper], ["VS Code", C.sky], ["C++", C.leaf], ["Python", C.gold], ["Java", C.paper]];
+    items.forEach(([s, col], i) => { const st = 1.2 + i * .62, p = bounce(prog(u, st, st + .7));
+      if (u > st) card(470 + (i % 2 ? 26 : -18), -60 + p * (590 - i * 52 + 60), 230, 50, s, { color: col, rot: (i % 3 - 1) * .035, seed: 110 + i }); });
+    bubble(860, 170, 500, 120, "帮我做一个树莓派脚本", prog(u, .25, .7), 34, 180);
+    const wob = u > 5.5 ? Math.sin(u * 8) * .05 : 0;
+    kid(210, 570, 1.2, { eyes: u > 4.5 ? "happy" : "open", armR: u > 4.5 ? -2.4 : -.4, tilt: wob }, t);
+    pi(1040, 480, .8, {}, t);
+  } },
+  { a: 14.2, b: 25.8, f(t, u) { // 虚惊一场
+    const alarm = u > 3.5 && u < 6.6, flash = alarm && Math.floor(u * 6) % 2;
+    room(t, { sky: flash ? "#4b1030" : C.night });
+    paperRect(250, 70, 780, 480, C.ink, 201, 1.4);
+    const lines = ["#!/usr/bin/env bash", "set -uo pipefail", "", 'run_step "设置时区" setup_timezone', 'run_step "安装 Git" install_base_tools', 'run_step "安装 C++" install_cpp', 'run_step "安装 Python" install_python', 'run_step "安装 Java" install_java', 'run_step "安装 Claude Code" install_claude_code'];
+    const shown = Math.floor(prog(u, .2, 3.2) * 240); let used = 0;
+    lines.forEach((ln, i) => { const n = Math.max(0, Math.min(ln.length, shown - used)); used += ln.length + 1;
+      c.font = `24px ${MONO}`; c.fillStyle = i < 2 ? C.sky : C.leaf; c.textAlign = "left"; c.textBaseline = "middle"; c.fillText(ln.slice(0, n), 286, 108 + i * 36); });
+    if (u > 3.5) card(640, 462, 520, 70, u > 6.8 ? "CR bytes: 0" : "CRLF lines: 270", { color: u > 6.8 ? C.leaf : C.rasp, ink: u > 6.8 ? C.ink : C.paper, font: MONO, size: 36, seed: 205, rot: u > 6.8 ? 0 : Math.sin(u * 30) * .012 });
+    stamp(860, 300, "虚惊一场", prog(u, 7.7, 8.1), -.14);
+    const e = u < 3.5 ? "open" : u < 6.8 ? "wide" : "flat";
+    kid(150, 590, 1.25, { eyes: e, mouth: e === "wide" ? "o" : e === "flat" ? "line" : "smile", armL: e === "wide" ? 2.5 : .5, armR: e === "wide" ? -2.5 : -.5, sweat: e === "flat", sq: e === "wide" ? 1.04 + Math.sin(u * 25) * .03 : 1 }, t);
+  } },
+  { a: 25.8, b: 33.4, f(t, u) { // 被拦下
+    room(t, { sky: C.dusk, hill: C.plum, desk: C.night });
+    const px = 180 + outCubic(prog(u, .1, 2)) * 300;
+    card(px + 150, 505, 190, 60, "rm -rf ...", { font: MONO, size: 25, color: C.paper, seed: 301 });
+    const gate = bounce(prog(u, 1.8, 2.5));
+    c.save(); c.translate(0, -520 + gate * 520);
+    paperRect(830, 30, 74, 545, C.rasp, 302, 1.3);
+    card(868, 210, 290, 104, "", { color: C.paper, seed: 303, rot: -.02 });
+    text("安全检查", 868, 192, 34, C.rasp, DISPLAY); text("未执行", 868, 232, 34, C.ink, DISPLAY); c.restore();
+    const late = u > 3.6;
+    kid(px - 10, 590, 1.2, { walk: u < 2 ? u * 12 : 0, eyes: late ? "flat" : "happy", mouth: late ? "line" : "smile", armR: late ? .1 : -1.2, armL: late ? -.1 : .5, sweat: late, tilt: late ? .1 : 0 }, t);
+    if (u > 4) card(330, 200, 420, 76, "前面的总结说早了", { color: C.gold, rot: -.03, size: 36, seed: 304 });
+  } },
+  { a: 33.4, b: 43.2, f(t, u) { // 再加一件 + 复杂机器
+    room(t, { sky: C.night, hill: C.wine });
+    bubble(790, 150, 760, 150, "再加上一件切换美国节点并全局和安装 claude desktop 和 pi store", prog(u, .2, .6) * (u < 4 ? 1 : 0), 34, 120);
+    if (u > 2.2 && u < 4) stamp(1040, 300, "其实是“一键”", prog(u, 2.2, 2.6), .08, 42, C.leaf);
+    const m = prog(u, 4.2, 6.5);
+    if (m > 0) {
+      const parts = [["测速", 480, 300, C.sky], ["全局模式", 780, 200, C.gold], ["断开旧连接", 1050, 310, C.coral], ["查出口国家", 660, 430, C.leaf], ["认证密钥", 960, 455, C.paper]];
+      c.strokeStyle = C.paper; c.lineWidth = 8; c.setLineDash([16, 12]); c.lineDashOffset = -t * 50; c.beginPath(); c.moveTo(250, 450); parts.forEach(q => c.lineTo(q[1], q[2])); c.globalAlpha = m; c.stroke(); c.globalAlpha = 1; c.setLineDash([]);
+      parts.forEach((q, i) => { const p = outBack(prog(u, 4.2 + i * .35, 4.8 + i * .35)); if (p > 0) card(q[1], q[2], 196, 76, q[0], { color: q[3], sx: p, sy: p, rot: Math.sin(t * 3 + i) * .03, seed: 400 + i, size: 28 }); });
+      for (let i = 0; i < 2; i++) { const gx = i ? 620 : 900, gy = i ? 180 : 110; c.save(); c.translate(gx, gy); c.rotate(Math.floor(t * 8) / 8 * (i ? 1 : -1)); for (let k = 0; k < 8; k++) { c.rotate(.785); c.fillStyle = C.muted; c.fillRect(-7, -48, 14, 18); } paperCircle(0, 0, 34, C.muted, 410 + i, .6); paperCircle(0, 0, 11, C.night, 412 + i, 0); c.restore(); }
+    }
+    if (u > 7) card(1100, 110, 270, 86, "请手动导入订阅", { color: C.rasp, ink: C.paper, size: 30, rot: .04, seed: 420 });
+    kid(220, 590, 1.2, { eyes: "happy", armR: Math.sin(t * 9) * .8 - 1.2, armL: Math.cos(t * 9) * .6 + .9 }, t);
+  } },
+  { a: 43.2, b: 50.2, f(t, u) { // 关键的一句
+    room(t, { sky: C.night, hill: C.dusk });
+    const fall = bounce(prog(u, .35, 1.25)), bx = 640, by = -220 + fall * 560;
+    const hit = u > .75, pop = u > 3.9;
+    const kq = !hit ? 1 : pop ? 1 + Math.sin(prog(u, 3.9, 4.5) * 9) * .14 * (1 - prog(u, 3.9, 4.5)) : .13;
+    if (u > 2.9) { const lift = inCubic(prog(u, 2.9, 3.8)); c.save(); c.translate(-lift * 200, -lift * 800); drawQ(bx, by); c.restore(); } else drawQ(bx, by);
+    function drawQ(x, y) { c.save(); c.translate(x, y); c.rotate(-.012); paperRect(-520, -210, 1040, 420, C.paper, 501, 1.5);
+      wrapped("为啥直接给订阅然后脚本自动切换不就行了", 0, 0, 900, 78, 112, C.ink, DISPLAY); c.restore(); }
+    kid(640, 590, 1.3, { sq: kq, eyes: pop ? "wide" : "open", mouth: pop ? "o" : "line", armR: pop ? -2.7 : -.4, armL: pop ? 2.7 : .4, bulb: pop ? "#fff6b0" : C.gold }, t);
+    if (pop) { c.strokeStyle = C.gold; c.lineWidth = 8; c.lineCap = "round"; for (let i = 0; i < 7; i++) { const a = -2.6 + i * .35, r1 = 60, r2 = 60 + prog(u, 4, 4.6) * 44, ox = 640, oy = 386; c.beginPath(); c.moveTo(ox + Math.cos(a) * r1, oy + Math.sin(a) * r1); c.lineTo(ox + Math.cos(a) * r2, oy + Math.sin(a) * r2); c.stroke(); } }
+  } },
+  { a: 50.2, b: 57.8, f(t, u) { // 一条命令
+    room(t, { sky: "#16324a", hill: C.deep, desk: C.plum, moon: C.gold });
+    const steps = [["启动 Clash", C.paper], ["导入订阅", C.sky], ["测速", C.gold], ["美国节点", C.coral], ["出口 US", C.leaf]];
+    const press = u > 1.1 && u < 1.5;
+    steps.forEach(([s, col], i) => { const st = 1.4 + i * .55, p = prog(u, st, st + .35), x = 195 + i * 222, flip = Math.abs(Math.cos(p * Math.PI));
+      card(x, 180, 196, 104, p > .5 ? s : "?", { color: p > .5 ? col : C.muted, sx: Math.max(.04, flip), seed: 600 + i, size: 32 });
+      if (i < 4 && p >= 1) text("→", x + 111, 180, 34, C.paper, BODY); });
+    paperRect(486, press ? 448 : 434, 308, press ? 76 : 90, C.rasp, 610);
+    text("us_on", 640, press ? 486 : 478, 50, C.paper, MONO);
+    const aw = u > 4.3;
+    pi(1035, 430, .95, { awake: aw, tilt: aw ? Math.sin(t * 6) * .03 : 0 }, t);
+    kid(300, 590 - (u < 1.1 ? Math.sin(prog(u, .4, 1.1) * Math.PI) * 60 : 0), 1.2, { eyes: u > 4.3 ? "happy" : "open", armR: press ? 1.6 : -1, armL: u > 4.3 ? 2.6 : .5 }, t);
+  } },
+  { a: 57.8, b: 65.6, f(t, u) { // 老实交代
+    c.fillStyle = "#0d0b1f"; c.fillRect(0, 0, W, H);
+    c.fillStyle = "rgba(244,236,216,.13)"; c.beginPath(); c.moveTo(560, -10); c.lineTo(720, -10); c.lineTo(1060, 640); c.lineTo(220, 640); c.fill();
+    paperRect(-20, 560, W + 40, 180, C.plum, 701, 1);
+    pi(790, 470, 1.05, { awake: true }, t);
+    const e = u > 3.6;
+    kid(370, 590, 1.25, { eyes: e ? "flat" : "open", mouth: e ? "line" : "smile", sweat: e, armL: .2, armR: -.2, tilt: e ? -.05 : 0 }, t);
+    stamp(640, 190, "测试对象：模拟接口", prog(u, 4.2, 4.6), -.05, 58, C.gold);
+  } },
+  { a: 65.6, b: 72.01, f(t, u) { // 字幕
+    c.fillStyle = C.night; c.fillRect(0, 0, W, H);
+    const rows = [["需求", "你"], ["关键追问", "你"], ["脚本与动画", "小克"], ["虚惊", "grep"], ["拦截", "安全检查"], ["树莓派", "尚未到场"]];
+    const y0 = 760 - outCubic(prog(u, 0, 2.2)) * 680;
+    rows.forEach(([a, b], i) => { const y = y0 + i * 66;
+      text(a, 610, y, 34, C.muted, BODY, "right"); text(b, 670, y, 38, i === 5 ? C.rasp : C.paper, DISPLAY, "left"); });
+    if (u > 2.6) text("全片由代码实时绘制，除字体外没有外部素材", W / 2, 536, 28, C.muted, BODY);
+    if (u > 3.4) card(W / 2, 622, 300, 92, "再加一键？", { color: C.leaf, size: 46, rot: -.02, seed: 801, sy: outBack(prog(u, 3.4, 3.8)), sx: outBack(prog(u, 3.4, 3.8)) });
+    kid(1130, 700, .9, { eyes: "happy", armR: -2.4 + Math.sin(t * 6) * .4 }, t);
+  } },
+];
+
+/* 颗粒，让画面有纸的质感 */
+const grain = document.createElement("canvas"); grain.width = 320; grain.height = 180;
+{ const g = grain.getContext("2d"), d = g.createImageData(320, 180), r = rnd(9);
+  for (let i = 0; i < d.data.length; i += 4) { const v = r() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 22; } g.putImageData(d, 0, 0); }
+
+function render(rawT) {
+  const t = Math.floor(clamp(rawT, 0, END) * 12) / 12; // 一拍二的定格节奏
+  const sc = SCENES.find(s => t >= s.a && t < s.b) || SCENES[SCENES.length - 1], u = t - sc.a;
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  sc.f(t, u);
+  const sub = SUBS.find(s => t >= s[0] && t < s[1]);
+  if (sub && sub[2] !== "用户：") subtitle(sub[2]);
+  const w = 1 - outCubic(prog(u, 0, .4));
+  if (w > 0 && sc.a > 0) paperRect(W * (1 - w) - 10, -10, W * w + 30, H + 20, C.rasp, 900, 1.2);
+  c.save(); c.imageSmoothingEnabled = false; c.globalCompositeOperation = "overlay"; c.drawImage(grain, 0, 0, W, H); c.restore();
+}
+
+/* 声音：只在点击“开声音”后用合成器发声 */
+let ac = null, master = null, soundOn = false;
+function tone(freq, dur, type = "triangle", vol = .12, slide = 0) {
+  if (!ac || !soundOn) return;
+  const o = ac.createOscillator(), g = ac.createGain(), n = ac.currentTime;
+  o.type = type; o.frequency.setValueAtTime(freq, n); if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), n + dur);
+  g.gain.setValueAtTime(vol, n); g.gain.exponentialRampToValueAtTime(.0008, n + dur);
+  o.connect(g); g.connect(master); o.start(n); o.stop(n + dur + .02);
+}
+const SCALE = [261.6, 293.7, 329.6, 392, 440, 523.3, 587.3, 659.3];
+const TUNE = [0, 2, 4, 5, 4, 2, 3, 1, 0, 2, 4, 7, 5, 4, 3, 2];
+const BEAT = .3;
+const SFX = [[.4, "pop"], [.68, "pop"], [.96, "pop"], [1.24, "ding"], [18, "alarm"], [18.5, "alarm"], [19, "alarm"], [22.1, "stamp"], [28.2, "thud"], [43.9, "thud"], [48.1, "ding"], [50.95, "ding"], [51.3, "click"], [54.5, "ding"], [62.1, "stamp"]];
+function fire(k) {
+  if (k === "pop") tone(620, .1, "square", .05, 300);
+  if (k === "ding") { tone(880, .4, "triangle", .13); tone(1318, .5, "triangle", .08); }
+  if (k === "alarm") tone(780, .24, "sawtooth", .06, -280);
+  if (k === "stamp") tone(150, .16, "square", .16, -90);
+  if (k === "thud") tone(120, .42, "sine", .4, -80);
+  if (k === "click") tone(1200, .05, "square", .08);
+}
+function audioStep(a, b) {
+  if (!soundOn || b <= a) return;
+  SFX.forEach(([at, k]) => { if (at > a && at <= b) fire(k); });
+  const quiet = v => (v > 43.9 && v < 48.1) || (v > 18 && v < 21) || v > 57.8 && v < 65.6;
+  for (let i = Math.ceil(a / BEAT); i * BEAT <= b; i++) { const v = i * BEAT; if (i * BEAT <= a || quiet(v) || v > 71) continue;
+    tone(SCALE[TUNE[i % 16]], .26, "triangle", .07);
+    if (i % 4 === 0) tone(SCALE[[0, 3, 4, 2][(i / 4 >> 2) % 4]] / 2, .7, "sine", .1); }
+}
+
+/* 播放器 */
+const $ = id => document.getElementById(id), playBtn = $("play"), seek = $("seek"), clock = $("clock"), soundBtn = $("sound"), fullBtn = $("full");
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let now = 0, playing = false, last = 0;
+const mmss = v => String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(Math.floor(v % 60)).padStart(2, "0");
+function paint() { render(now); seek.value = now; clock.textContent = mmss(now) + " / " + mmss(END); }
+function setPlaying(v) { playing = v; playBtn.textContent = v ? "暂停" : now >= END ? "重播" : "播放"; last = performance.now(); if (v) requestAnimationFrame(loop); }
+function loop(ts) {
+  if (!playing) return;
+  const prev = now; now = Math.min(END, now + Math.min(.1, (ts - last) / 1000)); last = ts;
+  audioStep(prev, now); paint();
+  if (now >= END) { setPlaying(false); return; }
+  requestAnimationFrame(loop);
+}
+function toggle() { if (!playing && now >= END) now = 0; setPlaying(!playing); }
+playBtn.onclick = toggle; cv.onclick = toggle;
+seek.oninput = () => { now = +seek.value; paint(); if (!playing) playBtn.textContent = "播放"; };
+soundBtn.onclick = () => {
+  try {
+    if (!ac) { ac = new (window.AudioContext || window.webkitAudioContext)(); master = ac.createGain(); master.gain.value = .8; master.connect(ac.destination); }
+    ac.resume(); soundOn = !soundOn; soundBtn.setAttribute("aria-pressed", soundOn); soundBtn.textContent = soundOn ? "关声音" : "开声音";
+  } catch (e) { soundBtn.disabled = true; soundBtn.textContent = "无法发声"; }
+};
+fullBtn.onclick = () => { const r = cv.requestFullscreen && cv.requestFullscreen(); if (r && r.catch) r.catch(() => {}); };
+addEventListener("keydown", e => { if (e.code === "Space" && !/BUTTON|INPUT/.test(e.target.tagName)) { e.preventDefault(); toggle(); } });
+
+const hash = /^#t(\d+(?:\.\d+)?)$/.exec(location.hash);
+now = hash ? +hash[1] : reduce ? 3.5 : 0;
+paint();
+const need = "再加一键根据一次真实的会话改编帮我做树莓派脚本全部装完检查换行符错了按字节数是看修好那条命令被安全拦下根本没跑前面总结说早上件切美国节点并局和小克造台很复杂机器最后步请你手动导入订阅为啥直接给然自不就行对哦现在只要填其余交条所它跑过吗还有真实测试象模拟接口需求关键追问与动画虚惊拦截尚未到场全片由代码时绘使用外部素材";
+const fontsReady = document.fonts && document.fonts.load
+  ? Promise.all([document.fonts.load('40px "ZCOOL KuaiLe"', need), document.fonts.load('30px "Noto Sans SC"', need), document.fonts.load('24px "JetBrains Mono"', "abc")]).catch(() => {})
+  : Promise.resolve();
+fontsReady.then(() => { paint(); if (!hash && !reduce) setPlaying(true); else playBtn.textContent = "播放"; });
+</script>
